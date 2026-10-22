@@ -358,6 +358,34 @@ function filterRunners(runners: RunnerInfo[]): RunnerInfo[] {
   return runners.filter((runner) => runner.owner && runner.type && !runner.orphan);
 }
 
+// The host's own retire path and its bypass-removal tag keep scale-down off a reused host; a host whose path never
+// armed or wedged would then live forever. Past the hard life it is terminated whatever its tag or GitHub state; the
+// offline-runner reap de-registers the runner it leaves.
+async function terminatePastHardLife(
+  runners: RunnerInfo[],
+  computeProvider: ScaleDownComputeProvider,
+): Promise<RunnerInfo[]> {
+  const hardLifeInMinutes = Number(process.env.RUNNER_HARD_LIFE_IN_MINUTES ?? 0);
+  if (!(hardLifeInMinutes > 0)) {
+    return runners;
+  }
+  const cutoff = moment(new Date()).utc().subtract(hardLifeInMinutes, 'minutes');
+  const kept: RunnerInfo[] = [];
+  for (const runner of runners) {
+    if (runner.launchTime === undefined || moment(runner.launchTime).utc() >= cutoff) {
+      kept.push(runner);
+      continue;
+    }
+    logger.info(
+      `Runner '${runner.id}' launched '${runner.launchTime}' is past its ${hardLifeInMinutes} min hard life.`,
+    );
+    await computeProvider.terminate(runner.id).catch((e) => {
+      logger.error(`Failed to terminate runner '${runner.id}' past its hard life`, { error: e });
+    });
+  }
+  return kept;
+}
+
 export async function scaleDown(): Promise<void> {
   githubCache.reset();
   const environment = process.env.ENVIRONMENT;
@@ -372,7 +400,7 @@ export async function scaleDown(): Promise<void> {
   await terminateOrphan(environment, computeProvider);
 
   // next scale down idle runners with respect to config and mark potential orphans
-  const providerRunners = await listRunners(environment, computeProvider);
+  const providerRunners = await terminatePastHardLife(await listRunners(environment, computeProvider), computeProvider);
   const activeProviderRunnersCount = providerRunners.length;
   logger.info(
     `Found: '${activeProviderRunnersCount}' active ${computeProvider.type.toUpperCase()} runners before clean-up.`,

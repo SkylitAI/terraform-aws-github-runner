@@ -411,6 +411,28 @@ describe('Scale down runners', () => {
         checkNonTerminated(runners);
       });
 
+      it(`Should terminate a bypass-tagged runner past its hard life, and leave one under it.`, async () => {
+        process.env.RUNNER_HARD_LIFE_IN_MINUTES = '435';
+        const past = createRunnerTestData('bypass-past', type, 436, true, false, true);
+        const under = createRunnerTestData('bypass-under', type, 434, true, false, false);
+        past.bypassRemoval = true;
+        under.bypassRemoval = true;
+        const runners = [past, under];
+
+        mockGitHubRunners(runners);
+        mockProviderRunners(runners);
+
+        try {
+          await scaleDown();
+        } finally {
+          delete process.env.RUNNER_HARD_LIFE_IN_MINUTES;
+        }
+
+        expect(mockTerminateRunners).toHaveBeenCalledTimes(1);
+        checkTerminated(runners);
+        checkNonTerminated(runners);
+      });
+
       it(`Should not terminate orphaned runner with bypass-removal tag set.`, async () => {
         const orphanRunner = createRunnerTestData('orphan-bypass', type, MINIMUM_BOOT_TIME + 1, false, false, false);
         orphanRunner.bypassRemoval = true;

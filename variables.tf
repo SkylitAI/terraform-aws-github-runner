@@ -100,6 +100,12 @@ variable "minimum_running_time_in_minutes" {
   default     = null
 }
 
+variable "runner_hard_life_in_minutes" {
+  description = "An instance older than this many minutes is terminated by scale-down, bypass-removal tag or not: the ceiling that holds when the host's own retire path does not. 0 disables it."
+  type        = number
+  default     = 0
+}
+
 variable "runner_boot_time_in_minutes" {
   description = "The minimum time for an EC2 runner to boot and register as a runner."
   type        = number
