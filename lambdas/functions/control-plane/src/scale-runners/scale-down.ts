@@ -358,9 +358,27 @@ function filterRunners(runners: RunnerInfo[]): RunnerInfo[] {
   return runners.filter((runner) => runner.owner && runner.type && !runner.orphan);
 }
 
+// A started job holds its host past any age: the hard life sits above the longest job, so a busy host there is
+// running a job the host itself outlived, and killing it re-queues that job onto a fresh boot. A read that fails
+// keeps the host for the next run rather than guess.
+async function runnerHasStartedJob(runner: RunnerInfo): Promise<boolean> {
+  if (!runner.owner || !runner.type) return false;
+  try {
+    const client = await getOrCreateOctokit(runner);
+    const ghRunners = (await listGitHubRunners(runner)).filter((gh) => gh.name.endsWith(runner.id));
+    for (const gh of ghRunners) {
+      if (await getGitHubRunnerBusyState(client, runner, gh.id)) return true;
+    }
+    return false;
+  } catch (e) {
+    logger.warn(`Runner '${runner.id}' busy state unread, kept past its hard life until the next run.`, { error: e });
+    return true;
+  }
+}
+
 // The host's own retire path and its bypass-removal tag keep scale-down off a reused host; a host whose path never
-// armed or wedged would then live forever. Past the hard life it is terminated whatever its tag or GitHub state; the
-// offline-runner reap de-registers the runner it leaves.
+// armed or wedged would then live forever. Past the hard life it is terminated whatever its tag, unless its runner
+// holds a started job; the offline-runner reap de-registers the runner it leaves.
 async function terminatePastHardLife(
   runners: RunnerInfo[],
   computeProvider: ScaleDownComputeProvider,
@@ -373,6 +391,11 @@ async function terminatePastHardLife(
   const kept: RunnerInfo[] = [];
   for (const runner of runners) {
     if (runner.launchTime === undefined || moment(runner.launchTime).utc() >= cutoff) {
+      kept.push(runner);
+      continue;
+    }
+    if (await runnerHasStartedJob(runner)) {
+      logger.info(`Runner '${runner.id}' is past its ${hardLifeInMinutes} min hard life but busy, kept.`);
       kept.push(runner);
       continue;
     }

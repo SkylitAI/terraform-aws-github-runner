@@ -101,7 +101,7 @@ variable "minimum_running_time_in_minutes" {
 }
 
 variable "runner_hard_life_in_minutes" {
-  description = "An instance older than this many minutes is terminated by scale-down, bypass-removal tag or not: the ceiling that holds when the host's own retire path does not. 0 disables it."
+  description = "An instance older than this many minutes is terminated by scale-down, bypass-removal tag or not, unless its runner is busy with a started job: the ceiling that holds when the host's own retire path does not. 0 disables it."
   type        = number
   default     = 0
 }

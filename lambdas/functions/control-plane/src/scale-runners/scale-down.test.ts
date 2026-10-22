@@ -433,6 +433,43 @@ describe('Scale down runners', () => {
         checkNonTerminated(runners);
       });
 
+      it(`Should keep a runner past its hard life whose job has started, tag or not.`, async () => {
+        process.env.RUNNER_HARD_LIFE_IN_MINUTES = '435';
+        const tagged = createRunnerTestData('busy-past-tagged', type, 436, true, false, false);
+        const untagged = createRunnerTestData('busy-past-untagged', type, 436, true, false, false);
+        const idle = createRunnerTestData('idle-under', type, 30, true, false, false);
+        tagged.bypassRemoval = true;
+        idle.bypassRemoval = true;
+        const runners = [tagged, untagged, idle];
+
+        mockGitHubRunners(runners);
+        mockProviderRunners(runners);
+
+        try {
+          await scaleDown();
+        } finally {
+          delete process.env.RUNNER_HARD_LIFE_IN_MINUTES;
+        }
+
+        expect(mockTerminateRunners).not.toHaveBeenCalled();
+      });
+
+      it(`Should keep a runner past its hard life when its busy state cannot be read.`, async () => {
+        process.env.RUNNER_HARD_LIFE_IN_MINUTES = '435';
+        const past = createRunnerTestData('past-unread', type, 436, true, false, false);
+        past.bypassRemoval = true;
+        mockProviderRunners([past]);
+        mockOctokit.paginate.mockRejectedValue(new Error('GitHub down'));
+
+        try {
+          await scaleDown();
+        } finally {
+          delete process.env.RUNNER_HARD_LIFE_IN_MINUTES;
+        }
+
+        expect(mockTerminateRunners).not.toHaveBeenCalled();
+      });
+
       it(`Should not terminate orphaned runner with bypass-removal tag set.`, async () => {
         const orphanRunner = createRunnerTestData('orphan-bypass', type, MINIMUM_BOOT_TIME + 1, false, false, false);
         orphanRunner.bypassRemoval = true;
