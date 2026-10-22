@@ -387,8 +387,50 @@ export async function scaleDown(): Promise<void> {
   const runners = filterRunners(providerRunners);
   await evaluateAndRemoveRunners(runners, scaleDownConfigs, computeProvider);
 
-  const activeProviderRunnersCountAfter = (await listRunners(environment, computeProvider)).length;
+  // The GitHub lists are read BEFORE the instance list below: a runner GitHub names then came from an instance
+  // launched earlier, so if that instance still runs the later list holds it and its runner is never removed.
+  const ghRunnersByOwner = await listOwnerGitHubRunners(runners);
+  const providerRunnersAfter = await listRunners(environment, computeProvider);
   logger.info(
-    `Found: '${activeProviderRunnersCountAfter}' active ${computeProvider.type.toUpperCase()} runners after clean-up.`,
+    `Found: '${providerRunnersAfter.length}' active ${computeProvider.type.toUpperCase()} runners after clean-up.`,
   );
+  await removeOfflineRunnersWithoutInstance(ghRunnersByOwner, new Set(providerRunnersAfter.map((r) => r.id)));
+}
+
+const INSTANCE_ID = /^i-[0-9a-f]{8,17}$/;
+
+async function listOwnerGitHubRunners(runners: RunnerInfo[]): Promise<{ runner: RunnerInfo; ghRunners: GhRunners }[]> {
+  // An empty prefix cannot tell this pool's runner names from another pool's in the same owner.
+  if (!process.env.RUNNER_NAME_PREFIX) return [];
+  const byOwner = new Map(runners.map((runner) => [runner.owner, runner]));
+  const lists = [];
+  for (const runner of byOwner.values()) {
+    try {
+      lists.push({ runner, ghRunners: await listGitHubRunners(runner) });
+    } catch (e) {
+      logger.warn(`Failed to list GitHub runners for owner '${runner.owner}'.`, { error: e });
+    }
+  }
+  return lists;
+}
+
+// A host that shuts itself down leaves its runner registered and offline; with no instance left nothing else
+// removes it. Only an exact `<RUNNER_NAME_PREFIX><instance id>` name is this pool's: the prefixes nest.
+async function removeOfflineRunnersWithoutInstance(
+  ghRunnersByOwner: { runner: RunnerInfo; ghRunners: GhRunners }[],
+  liveInstanceIds: Set<string>,
+): Promise<void> {
+  const prefix = process.env.RUNNER_NAME_PREFIX || '';
+  for (const { runner, ghRunners } of ghRunnersByOwner) {
+    const stale = ghRunners.filter((gh) => {
+      const instanceId = gh.name.startsWith(prefix) ? gh.name.slice(prefix.length) : '';
+      return gh.status === 'offline' && INSTANCE_ID.test(instanceId) && !liveInstanceIds.has(instanceId);
+    });
+    if (stale.length === 0) continue;
+    const client = await getOrCreateOctokit(runner);
+    for (const gh of stale) {
+      const result = await deleteGitHubRunner(client, runner, gh.id);
+      logger.info(`Offline GitHub runner '${gh.name}' (${gh.id}) has no instance, de-registered: ${result.success}`);
+    }
+  }
 }

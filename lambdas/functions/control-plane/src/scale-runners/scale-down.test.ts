@@ -258,6 +258,84 @@ describe('Scale down runners', () => {
     mockCreateClient.mockResolvedValue(mockOctokit as unknown as Octokit);
   });
 
+  describe('Offline GitHub runners without an instance', () => {
+    const PREFIX = 'aethos-ci-';
+    const LIVE = 'i-0aaaaaaaaaaaaaaa1';
+    const GONE = 'i-0bbbbbbbbbbbbbbb2';
+    const live = createRunnerTestData('live', 'Org', 1, true, false, false);
+    live.id = LIVE;
+
+    function ghRunner(id: number, name: string, status: string) {
+      return { id, name, status, busy: false, labels: [] };
+    }
+
+    beforeEach(() => {
+      process.env.RUNNER_NAME_PREFIX = PREFIX;
+      mockListRunners.mockImplementation(async (_environment, orphan) => (orphan ? [] : [live]));
+    });
+
+    it('de-registers an offline runner of this pool whose instance is gone, one call per host', async () => {
+      mockOctokit.paginate.mockResolvedValue([
+        ghRunner(1, PREFIX + LIVE, 'online'),
+        ghRunner(2, PREFIX + GONE, 'offline'),
+      ]);
+
+      await scaleDown();
+
+      expect(mockOctokit.actions.deleteSelfHostedRunnerFromOrg).toHaveBeenCalledTimes(1);
+      expect(mockOctokit.actions.deleteSelfHostedRunnerFromOrg).toHaveBeenCalledWith({
+        runner_id: 2,
+        org: TEST_DATA.repositoryOwner,
+      });
+      expect(mockTerminateRunners).not.toHaveBeenCalled();
+    });
+
+    it('never removes an offline runner whose instance still runs', async () => {
+      mockOctokit.paginate.mockResolvedValue([ghRunner(1, PREFIX + LIVE, 'offline')]);
+
+      await scaleDown();
+
+      expect(mockOctokit.actions.deleteSelfHostedRunnerFromOrg).not.toHaveBeenCalled();
+    });
+
+    it('never removes a runner whose instance shows up only in the list read after GitHub', async () => {
+      const late = { ...live, id: GONE };
+      let calls = 0;
+      mockListRunners.mockImplementation(async (_environment, orphan) => {
+        if (orphan) return [];
+        calls++;
+        return calls === 1 ? [live] : [live, late];
+      });
+      mockOctokit.paginate.mockResolvedValue([ghRunner(2, PREFIX + GONE, 'offline')]);
+
+      await scaleDown();
+
+      expect(mockOctokit.actions.deleteSelfHostedRunnerFromOrg).not.toHaveBeenCalled();
+    });
+
+    it('leaves online runners, other pools nested under the prefix, and non-instance names', async () => {
+      mockOctokit.paginate.mockResolvedValue([
+        ghRunner(3, PREFIX + GONE, 'online'),
+        ghRunner(4, PREFIX + '8-' + GONE, 'offline'),
+        ghRunner(5, 'aethos-store-' + GONE, 'offline'),
+        ghRunner(6, PREFIX + 'manual-box', 'offline'),
+      ]);
+
+      await scaleDown();
+
+      expect(mockOctokit.actions.deleteSelfHostedRunnerFromOrg).not.toHaveBeenCalled();
+    });
+
+    it('removes nothing when the pool has no runner name prefix', async () => {
+      delete process.env.RUNNER_NAME_PREFIX;
+      mockOctokit.paginate.mockResolvedValue([ghRunner(2, GONE, 'offline')]);
+
+      await scaleDown();
+
+      expect(mockOctokit.actions.deleteSelfHostedRunnerFromOrg).not.toHaveBeenCalled();
+    });
+  });
+
   const endpoints = ['https://api.github.com', 'https://github.enterprise.something', 'https://companyname.ghe.com'];
 
   describe.each(endpoints)('for %s', (endpoint) => {
