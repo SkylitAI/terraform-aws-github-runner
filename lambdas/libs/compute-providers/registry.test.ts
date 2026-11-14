@@ -25,6 +25,7 @@ it('exposes every configured provider through both capability registries', () =>
       resolveLabelsForRunners: expect.any(Function),
       getCurrentRunners: expect.any(Function),
       createRunners: expect.any(Function),
+      launchedForJob: expect.any(Function),
     });
     expect(controlPlaneRegistry.capability(type, 'scaleDown')()).toEqual({
       list: expect.any(Function),
