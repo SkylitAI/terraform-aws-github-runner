@@ -85,6 +85,7 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
   const enableJitConfig = yn(process.env.ENABLE_JIT_CONFIG, { default: ephemeralEnabled });
   const disableAutoUpdate = yn(process.env.DISABLE_RUNNER_AUTOUPDATE, { default: false });
   const enableJobQueuedCheck = yn(process.env.ENABLE_JOB_QUEUED_CHECK, { default: true });
+  const jobLaunchDedupeSeconds = parseInt(process.env.JOB_LAUNCH_DEDUPE_SECONDS || '0');
   const runnerNamePrefix = process.env.RUNNER_NAME_PREFIX || '';
   const ssmConfigPath = process.env.SSM_CONFIG_PATH || '';
   const ssmParameterStoreTags: { Key: string; Value: string }[] =
@@ -246,6 +247,25 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
         }
       }
 
+      // A second delivery of one job's `queued` launches nothing: the first launch already holds the job's retry.
+      if (jobLaunchDedupeSeconds > 0) {
+        let launched = queuedMessages.some((m) => m.id === message.id);
+        if (!launched && computeProvider.launchedForJob) {
+          try {
+            launched = await computeProvider.launchedForJob(message.id, jobLaunchDedupeSeconds);
+          } catch (e) {
+            messageLogger.warn('launchedForJob check failed, launching (fail-open)', { error: (e as Error).message });
+          }
+        }
+        if (launched) {
+          messageLogger.info('No runner will be created, a runner was already launched for this job.', {
+            jobId: message.id,
+            jobLaunchDedupeSeconds,
+          });
+          continue;
+        }
+      }
+
       scaleUp++;
       queuedMessages.push(message);
     }
@@ -330,6 +350,7 @@ export async function scaleUp(payloads: ActionRequestMessageSQS[]): Promise<stri
         numberOfRunners: newRunners,
         githubInstallationClient,
         state: runnerLabelResolution.state,
+        jobId: newRunners === 1 && queuedMessages.length === 1 ? queuedMessages[0].id : undefined,
       });
     } catch (error) {
       logger.error('Compute provider threw an unexpected error.', {

@@ -789,6 +789,12 @@ variable "enable_job_queued_check" {
   default     = null
 }
 
+variable "job_launch_dedupe_seconds" {
+  description = "Scale-up launches no runner for a job it launched one for within this many seconds: GitHub delivers `queued` twice for a job behind an environment. Keep it below the job retry delay so a retry still launches. 0 disables it."
+  type        = number
+  default     = 0
+}
+
 variable "enable_managed_runner_security_group" {
   description = "Enables creation of the default managed security group. Unmanaged security groups can be specified via `runner_additional_security_group_ids`."
   type        = bool

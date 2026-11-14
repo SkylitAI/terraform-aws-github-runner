@@ -53,6 +53,8 @@ export interface CreateScaleUpRunnersInput<TState = unknown> {
   numberOfRunners: number;
   githubInstallationClient: Octokit;
   state: TState;
+  // The one job a single runner is launched for: the provider marks the runner with it (launchedForJob).
+  jobId?: number;
 }
 
 export interface RunnerLabelResolution<TState = unknown> {
@@ -70,6 +72,8 @@ export interface ScaleUpComputeProvider<TState = unknown> extends ComputeProvide
   resolveLabelsForRunners(messageLabels: string[]): Promise<RunnerLabelResolution<TState>>;
   getCurrentRunners(state: TState, input: CurrentRunnersInput): Promise<number>;
   createRunners(input: CreateScaleUpRunnersInput<TState>): Promise<CreateRunnerResult>;
+  // Whether a live runner was launched for this job within the last `withinSeconds`.
+  launchedForJob?(jobId: number, withinSeconds: number): Promise<boolean>;
 }
 
 export interface RunnerInfo {

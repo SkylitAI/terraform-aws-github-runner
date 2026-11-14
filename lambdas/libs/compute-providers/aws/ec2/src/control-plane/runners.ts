@@ -58,6 +58,9 @@ function constructFilters(filters?: Ec2ListRunnerFilters): Ec2Filter[][] {
     if (filters.orphan) {
       ec2FiltersBase.push({ Name: 'tag:ghr:orphan', Values: ['true'] });
     }
+    if (filters.jobId !== undefined) {
+      ec2FiltersBase.push({ Name: 'tag:ghr:job_id', Values: [String(filters.jobId)] });
+    }
   }
 
   for (const key of ['tag:ghr:Application']) {
@@ -106,6 +109,24 @@ function getRunnerInfo(runningInstances: DescribeInstancesResult) {
     }
   }
   return runners;
+}
+
+// GitHub delivers `queued` twice for a job behind an environment (queued, waiting, queued, seconds apart), and each
+// delivery is its own scale-up message: only a mark on the instance, read here, tells the second it is not a new job.
+export async function launchedForJob(
+  environment: string | undefined,
+  jobId: number,
+  withinSeconds: number,
+): Promise<boolean> {
+  const since = Date.now() - withinSeconds * 1000;
+  const runners = await listEC2Runners({ environment, jobId });
+  return runners.some((r) => r.launchTime !== undefined && r.launchTime.getTime() >= since);
+}
+
+function jobTags(runnerParameters: RunnerInputParameters): Tag[] {
+  return runnerParameters.jobId !== undefined && runnerParameters.numberOfRunners === 1
+    ? [{ Key: 'ghr:job_id', Value: String(runnerParameters.jobId) }]
+    : [];
 }
 
 export async function terminateRunner(instanceId: string): Promise<void> {
@@ -503,6 +524,7 @@ async function createInstances(
     { Key: 'ghr:created_by', Value: runnerParameters.source },
     { Key: 'ghr:Type', Value: runnerParameters.runnerType },
     { Key: 'ghr:Owner', Value: runnerParameters.runnerOwner },
+    ...jobTags(runnerParameters),
   ];
 
   if (runnerParameters.tracingEnabled) {
@@ -587,6 +609,7 @@ async function createInstancesWithRunInstances(
     { Key: 'ghr:created_by', Value: runnerParameters.numberOfRunners === 1 ? 'scale-up-lambda' : 'pool-lambda' },
     { Key: 'ghr:Type', Value: runnerParameters.runnerType },
     { Key: 'ghr:Owner', Value: runnerParameters.runnerOwner },
+    ...jobTags(runnerParameters),
   ];
 
   if (runnerParameters.tracingEnabled) {

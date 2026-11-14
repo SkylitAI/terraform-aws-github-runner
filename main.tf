@@ -206,6 +206,7 @@ module "runners" {
   enable_organization_runners          = var.enable_organization_runners
   enable_ephemeral_runners             = var.enable_ephemeral_runners
   enable_job_queued_check              = var.enable_job_queued_check
+  job_launch_dedupe_seconds            = var.job_launch_dedupe_seconds
   enable_jit_config                    = var.enable_jit_config
   enable_on_demand_failover_for_errors = var.enable_runner_on_demand_failover_for_errors
   scale_errors                         = var.scale_errors

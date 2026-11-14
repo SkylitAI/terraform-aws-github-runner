@@ -9,7 +9,7 @@ import type {
 } from '../../../../core';
 import yn from 'yn';
 
-import { listEC2Runners } from './runners';
+import { launchedForJob, listEC2Runners } from './runners';
 import type { Ec2OverrideConfig } from './runners.d';
 import {
   getDefaultBlockDeviceNameFromLaunchTemplate,
@@ -63,7 +63,13 @@ async function getCurrentEc2Runners(
 }
 
 async function createEc2ScaleUpRunners(
-  { githubRunnerConfig, numberOfRunners, githubInstallationClient, state }: CreateScaleUpRunnersInput<Ec2ScaleUpState>,
+  {
+    githubRunnerConfig,
+    numberOfRunners,
+    githubInstallationClient,
+    state,
+    jobId,
+  }: CreateScaleUpRunnersInput<Ec2ScaleUpState>,
   createStartRunnerConfig: CreateStartRunnerConfig,
 ): Promise<CreateRunnerResult> {
   const config = loadEc2ScaleUpProviderConfig();
@@ -73,6 +79,7 @@ async function createEc2ScaleUpRunners(
     {
       ...config,
       ec2OverrideConfig: state.ec2OverrideConfig,
+      jobId,
     },
     numberOfRunners,
     githubInstallationClient,
@@ -88,5 +95,6 @@ export function createEc2ScaleUpProvider(
     resolveLabelsForRunners: resolveEc2LabelsForRunners,
     getCurrentRunners: getCurrentEc2Runners,
     createRunners: (input) => createEc2ScaleUpRunners(input, createStartRunnerConfig),
+    launchedForJob: (jobId, withinSeconds) => launchedForJob(process.env.ENVIRONMENT, jobId, withinSeconds),
   };
 }

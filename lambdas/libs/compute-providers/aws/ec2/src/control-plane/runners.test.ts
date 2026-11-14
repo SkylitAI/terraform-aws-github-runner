@@ -22,7 +22,7 @@ import 'aws-sdk-client-mock-jest/vitest';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LambdaRunnerSource, RunnerInfo, RunnerType } from '../../../../core';
-import { createRunner, listEC2Runners, tag, terminateRunner, untag } from './runners';
+import { createRunner, launchedForJob, listEC2Runners, tag, terminateRunner, untag } from './runners';
 import type { Ec2OverrideConfig, RunnerInputParameters } from './runners.d';
 
 process.env.AWS_REGION = 'eu-east-1';
@@ -253,6 +253,35 @@ describe('list instances', () => {
   });
 });
 
+describe('launched for job', () => {
+  const launchedAt = (t: Date): DescribeInstancesResult => ({
+    Reservations: [{ Instances: [{ ...mockRunningInstances.Reservations![0].Instances![0], LaunchTime: t }] }],
+  });
+
+  it('reads the job mark of a live runner in its environment', async () => {
+    mockEC2Client.on(DescribeInstancesCommand).resolves(launchedAt(new Date()));
+    await expect(launchedForJob(ENVIRONMENT, 42, 60)).resolves.toBe(true);
+    expect(mockEC2Client).toHaveReceivedCommandWith(DescribeInstancesCommand, {
+      Filters: [
+        { Name: 'instance-state-name', Values: ['running', 'pending'] },
+        { Name: 'tag:ghr:environment', Values: [ENVIRONMENT] },
+        { Name: 'tag:ghr:job_id', Values: ['42'] },
+        { Name: 'tag:ghr:Application', Values: ['github-action-runner'] },
+      ],
+    });
+  });
+
+  it('answers false for a mark older than the window: a retry of a job still queued launches', async () => {
+    mockEC2Client.on(DescribeInstancesCommand).resolves(launchedAt(new Date(Date.now() - 120_000)));
+    await expect(launchedForJob(ENVIRONMENT, 42, 60)).resolves.toBe(false);
+  });
+
+  it('answers false with no marked runner', async () => {
+    mockEC2Client.on(DescribeInstancesCommand).resolves({});
+    await expect(launchedForJob(ENVIRONMENT, 42, 60)).resolves.toBe(false);
+  });
+});
+
 describe('terminate runner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -351,6 +380,19 @@ describe('create runner', () => {
         type: type,
       }),
     });
+  });
+
+  it('marks the one runner launched for a job with the job id', async () => {
+    await createRunner({ ...createRunnerConfig(defaultRunnerConfig), jobId: 42 });
+    const input = mockEC2Client.commandCalls(CreateFleetCommand)[0].args[0].input;
+    expect(input.TagSpecifications?.[0].Tags).toContainEqual({ Key: 'ghr:job_id', Value: '42' });
+  });
+
+  it('marks no runner when one launch is several runners', async () => {
+    mockEC2Client.on(CreateFleetCommand).resolves({ Instances: [{ InstanceIds: ['i-1234', 'i-5678'] }] });
+    await createRunner({ ...createRunnerConfig(defaultRunnerConfig), numberOfRunners: 2, jobId: 42 });
+    const input = mockEC2Client.commandCalls(CreateFleetCommand)[0].args[0].input;
+    expect(input.TagSpecifications?.flatMap((t) => t.Tags ?? []).some((t) => t.Key === 'ghr:job_id')).toBe(false);
   });
 
   it('calls create fleet of 2 instances with the correct config for org ', async () => {
