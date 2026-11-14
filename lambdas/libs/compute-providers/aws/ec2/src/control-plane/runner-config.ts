@@ -35,6 +35,7 @@ export interface CreateEC2RunnerConfig extends Ec2ProviderConfig {
   ec2OverrideConfig?: RunnerInputParameters['ec2OverrideConfig'];
   numberOfRunners?: number;
   useDedicatedHost?: boolean;
+  jobId?: number;
 }
 
 export function loadEc2ProviderConfig(): Ec2ProviderConfig {

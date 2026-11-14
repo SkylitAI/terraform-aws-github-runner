@@ -17,7 +17,7 @@ import type {
   ScaleUpComputeProvider,
 } from './types';
 import { getParameter } from '@aws-github-runner/aws-ssm-util';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Octokit } from '@octokit/rest';
 
 const mockOctokit = {
@@ -1503,6 +1503,62 @@ describe('scaleUp with public GH', () => {
         }),
       );
     });
+  });
+});
+
+describe('scaleUp job launch dedupe (a job queued twice behind an environment)', () => {
+  const mockLaunchedForJob = vi.fn<(jobId: number, withinSeconds: number) => Promise<boolean>>();
+
+  beforeEach(() => {
+    process.env.ENABLE_ORGANIZATION_RUNNERS = 'true';
+    process.env.ENABLE_EPHEMERAL_RUNNERS = 'true';
+    process.env.ENABLE_JOB_QUEUED_CHECK = 'false';
+    mockComputeProvider.launchedForJob = mockLaunchedForJob;
+    mockLaunchedForJob.mockReset();
+    mockLaunchedForJob.mockResolvedValue(false);
+  });
+
+  afterEach(() => {
+    delete mockComputeProvider.launchedForJob;
+  });
+
+  it('reads no mark and launches as before when the window is unset', async () => {
+    await scaleUpModule.scaleUp(TEST_DATA);
+    expect(mockLaunchedForJob).not.toBeCalled();
+    expect(mockCreateRunners).toBeCalledTimes(1);
+  });
+
+  it('launches nothing and asks no retry for a job a runner was launched for within the window', async () => {
+    process.env.JOB_LAUNCH_DEDUPE_SECONDS = '60';
+    mockLaunchedForJob.mockResolvedValue(true);
+    await expect(scaleUpModule.scaleUp(TEST_DATA)).resolves.toEqual([]);
+    expect(mockLaunchedForJob).toBeCalledWith(TEST_DATA_SINGLE.id, 60);
+    expect(mockCreateRunners).not.toBeCalled();
+    expect(mockPublishRetryMessage).not.toBeCalled();
+  });
+
+  it('launches a new job and marks its one runner with the job id', async () => {
+    process.env.JOB_LAUNCH_DEDUPE_SECONDS = '60';
+    await scaleUpModule.scaleUp(TEST_DATA);
+    expect(mockCreateRunners).toBeCalledTimes(1);
+    expect(mockCreateRunners.mock.calls[0][0]).toMatchObject({ numberOfRunners: 1, jobId: TEST_DATA_SINGLE.id });
+  });
+
+  it('launches one runner for two deliveries of one job in one batch', async () => {
+    process.env.JOB_LAUNCH_DEDUPE_SECONDS = '60';
+    await scaleUpModule.scaleUp([
+      { ...TEST_DATA_SINGLE, messageId: 'first' },
+      { ...TEST_DATA_SINGLE, messageId: 'second' },
+    ]);
+    expect(mockCreateRunners).toBeCalledTimes(1);
+    expect(mockCreateRunners.mock.calls[0][0]).toMatchObject({ numberOfRunners: 1, jobId: TEST_DATA_SINGLE.id });
+  });
+
+  it('launches when the mark cannot be read (fail-open)', async () => {
+    process.env.JOB_LAUNCH_DEDUPE_SECONDS = '60';
+    mockLaunchedForJob.mockRejectedValue(new Error('DescribeInstances throttled'));
+    await scaleUpModule.scaleUp(TEST_DATA);
+    expect(mockCreateRunners).toBeCalledTimes(1);
   });
 });
 

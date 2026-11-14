@@ -591,6 +591,12 @@ variable "enable_job_queued_check" {
   default     = null
 }
 
+variable "job_launch_dedupe_seconds" {
+  description = "Scale-up launches no runner for a job it launched one for within this many seconds: GitHub delivers `queued` twice for a job behind an environment. Keep it below the job retry delay so a retry still launches. 0 disables it."
+  type        = number
+  default     = 0
+}
+
 variable "pool_lambda_timeout" {
   description = "Time out for the pool lambda in seconds."
   type        = number

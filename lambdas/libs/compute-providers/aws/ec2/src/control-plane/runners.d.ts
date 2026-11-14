@@ -11,6 +11,7 @@ import type { LambdaRunnerSource, ListRunnerFilters, RunnerType } from '../../..
 
 export interface Ec2ListRunnerFilters extends ListRunnerFilters {
   statuses?: string[];
+  jobId?: number;
 }
 
 export interface Ec2OverrideConfig {
@@ -42,6 +43,7 @@ export interface RunnerInputParameters {
   };
   ec2OverrideConfig?: Ec2OverrideConfig;
   numberOfRunners: number;
+  jobId?: number;
   source: LambdaRunnerSource;
   amiIdSsmParameterName?: string;
   tracingEnabled?: boolean;
